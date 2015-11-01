@@ -3,15 +3,19 @@ cmake_minimum_required( VERSION 2.6 FATAL_ERROR )
 PROJECT(damascene Fortran CXX C)
 
 FIND_PACKAGE(CUDA)
+
+# Add debug flags
+#SET(CUDA_NVCC_FLAGS -g;-G)
+
 SET(CMAKE_MODULE_PATH  ${CMAKE_MODULE_PATH} ${CMAKE_SOURCE_DIR}/CMakeModules)
 
-CUDA_INCLUDE_DIRECTORIES( ${CUDA_SDK_ROOT_DIR}/common/inc ${CMAKE_CURRENT_SOURCE_DIR})
-INCLUDE_DIRECTORIES(      ${CUDA_SDK_ROOT_DIR}/common/inc ${CUDA_INCLUDE_DIRS}       )
+#CUDA_INCLUDE_DIRECTORIES( ${CUDA_SDK_ROOT_DIR}/common/inc ${CMAKE_CURRENT_SOURCE_DIR})
+#INCLUDE_DIRECTORIES(      ${CUDA_SDK_ROOT_DIR}/common/inc ${CUDA_INCLUDE_DIRS}       )
 INCLUDE_DIRECTORIES(      ${CMAKE_SOURCE_DIR}/include                                )
 CUDA_INCLUDE_DIRECTORIES(      ${CMAKE_SOURCE_DIR}/include                                )
 
-INCLUDE_DIRECTORIES(/home/VI/staff/amueller/local/acml4.4.0/ifort64/include)  # I'm sorry ;)
-LINK_Directories(/home/VI/staff/amueller/local/acml4.4.0/ifort64/lib)  # I'm sorry ;)
+INCLUDE_DIRECTORIES(/usr/local/acml/gfortran64/include)  # I'm sorry ;)
+LINK_Directories(/usr/local/acml/gfortran64/lib)  # I'm sorry ;)
 
 
 SET(CUDA_ARCHITECTURE "-arch=sm_20" CACHE STRING "The CUDA architecture to compile for, i.e. -arch=sm_20")

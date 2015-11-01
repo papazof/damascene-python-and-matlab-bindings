@@ -40,13 +40,15 @@ void transpose(int width, int height, float* input, float* output) {
   }                                         
 }
 
-void gpb(const unsigned int* in_image,unsigned int width, unsigned int height, float* borders,int* textons, float* orientations, int device_num )
+//void gpb(const unsigned int* in_image,unsigned int width, unsigned int height, float* borders,int* textons, float* orientations, int device_num)
+void gpb(const float* in_image,unsigned int width, unsigned int height, float* borders, int* textons, float* orientations, int device_num)
 {
 	cuInit(0);
 	cudaSetDevice(device_num);
-
+/*
 	uint* devRgbU;
-	/*//copy in_image to device:*/
+	// copy in_image to device:
+
 	uint nPixels = width * height;
 	cudaMalloc((void**)&devRgbU, nPixels*sizeof(uint));
 	size_t totalMemory, availableMemory;
@@ -96,10 +98,16 @@ void gpb(const unsigned int* in_image,unsigned int width, unsigned int height, f
 	CUDA_SAFE_CALL(cudaFree(devCga));
 	CUDA_SAFE_CALL(cudaFree(devCgb));
 	CUDA_SAFE_CALL(cudaFree(devTg));
-
+*/
 	float* devMPb;
+	devMPb = (float*)in_image;
+
+	int nPixels = width * height;
+
+	int matrixPitchInFloats = findPitchInFloats(nPixels);
+
 	cudaMalloc((void**)&devMPb, sizeof(float) * nPixels);
-	nonMaxSuppression(width, height, devMPbO, matrixPitchInFloats, devMPb);
+//	nonMaxSuppression(width, height, devMPbO, matrixPitchInFloats, devMPb);
 	//int devMatrixPitch = matrixPitchInFloats * sizeof(float);
 	int radius = 5;
 	//int radius = 10;
@@ -116,28 +124,35 @@ void gpb(const unsigned int* in_image,unsigned int width, unsigned int height, f
 	int nEigNum = 9;
 	float fEigTolerance = 1e-3;
 	generalizedEigensolve(theStencil, devMatrix, matrixPitchInFloats, nEigNum, &eigenvalues, &devEigenvectors, fEigTolerance);
+
+	printf("Generalized Eigenvectors solve completed\n");
+
 	float* devSPb = 0;
 	size_t devSPb_pitch = 0;
 	CUDA_SAFE_CALL(cudaMallocPitch((void**)&devSPb, &devSPb_pitch, nPixels *  sizeof(float), 8));
 	cudaMemset(devSPb, 0, matrixPitchInFloats * sizeof(float) * 8);
 
 	spectralPb(eigenvalues, devEigenvectors, width, height, nEigNum, devSPb, matrixPitchInFloats);
+/* ???
 	float* devGPb = 0;
 	CUDA_SAFE_CALL(cudaMalloc((void**)&devGPb, sizeof(float) * nPixels));
 	float* devGPball = 0;
 	CUDA_SAFE_CALL(cudaMalloc((void**)&devGPball, sizeof(float) * matrixPitchInFloats * 8));
-	StartCalcGPb(nPixels, matrixPitchInFloats, 8, devCombinedGradient, devSPb, devMPb, devGPball, devGPb);
+ 	StartCalcGPb(nPixels, matrixPitchInFloats, 8, devCombinedGradient, devSPb, devMPb, devGPball, devGPb);
 	float* devGPb_thin = 0;
 	CUDA_SAFE_CALL(cudaMalloc((void**)&devGPb_thin, nPixels * sizeof(float) ));
 	PostProcess(width, height, width, devGPb, devMPb, devGPb_thin); //note: 3rd param width is the actual pitch of the image
 	NormalizeGpbAll(nPixels, 8, matrixPitchInFloats, devGPball);
-
+*/
 	cudaThreadSynchronize();
 	printf("CUDA Status : %s\n", cudaGetErrorString(cudaGetLastError()));
-	/*float* hostGPb = (float*)malloc(sizeof(float)*nPixels);*/
-	/*memset(hostGPb, 0, sizeof(float) * nPixels);*/
+	
+	//float* hostGPb = (float*)malloc(sizeof(float)*nPixels);
+	//memset(hostGPb, 0, sizeof(float) * nPixels);
 	std::cout << "nPixels: " << nPixels << std::endl;
+/* ???
 	cudaMemcpy(borders, devGPb, sizeof(float)*nPixels, cudaMemcpyDeviceToHost); //TODO: put in again
+*/
 	/*cudaMemcpy(out_image, devGreyscale, sizeof(float)*nPixels, cudaMemcpyDeviceToHost);*/
 	//cutSavePGMf(outputPGMfilename, hostGPb, width, height);
 	//writeFile(outputPBfilename, width, height, hostGPb);
@@ -151,7 +166,7 @@ void gpb(const unsigned int* in_image,unsigned int width, unsigned int height, f
 	//writeFile(outputthinPBfilename, width, height, hostGPb);
 	//free(hostGPb_thin);
 	/* end thin image */
-
+/* ???
   float* hostGPbAll = (float*)malloc(sizeof(float) * matrixPitchInFloats * 8);
   cudaMemcpy(hostGPbAll, devGPball, sizeof(float) * matrixPitchInFloats * 8, cudaMemcpyDeviceToHost);
   //int oriMap[] = {0, 1, 2, 3, 4, 5, 6, 7};
@@ -160,6 +175,7 @@ void gpb(const unsigned int* in_image,unsigned int width, unsigned int height, f
   for(int i = 0; i < 8; i++) {
     transpose(width, height, hostGPbAll + matrixPitchInFloats * oriMap[i], orientations + width * height * i);
   }
+*/
   //int dim[3];
   //dim[0] = 8; 
   //dim[1] = width;
@@ -173,16 +189,16 @@ void gpb(const unsigned int* in_image,unsigned int width, unsigned int height, f
   //}
   
 	/*free(hostGPb);*/
-	free(hostGPbAll);
+// ???	free(hostGPbAll);
 	//free(hostGPbAllConcat);
 
 
 	CUDA_SAFE_CALL(cudaFree(devEigenvectors));
-	CUDA_SAFE_CALL(cudaFree(devCombinedGradient));
+// ???	CUDA_SAFE_CALL(cudaFree(devCombinedGradient));
 	CUDA_SAFE_CALL(cudaFree(devSPb));
-	CUDA_SAFE_CALL(cudaFree(devGPb));
-	CUDA_SAFE_CALL(cudaFree(devGPb_thin));
-	CUDA_SAFE_CALL(cudaFree(devGPball));
+// ???	CUDA_SAFE_CALL(cudaFree(devGPb));
+// ???	CUDA_SAFE_CALL(cudaFree(devGPb_thin));
+// ???	CUDA_SAFE_CALL(cudaFree(devGPball));
 	cudaThreadExit();
 }
 

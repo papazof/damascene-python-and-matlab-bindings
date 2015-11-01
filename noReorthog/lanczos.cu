@@ -18,16 +18,19 @@
 #include <getopt.h>
 #include <time.h>
 #include <math.h>
-#include "cublas.h"
-#include "cutil.h"
+#include <cublas_v2.h>
 #include <acml.h>
 #include <vector>
-#include "stencilMVM.h"
 
+#include "cutil.h"
+#include "stencilMVM.h"
+#include "cublasErr.h"
 
 typedef std::vector<float> floatVector;
 typedef std::vector<double> doubleVector;
 typedef std::vector<bool> boolVector;
+
+static cublasHandle_t cubHandle;
 
 float getTimeUs(struct timeval start, struct timeval stop) {
   return (stop.tv_sec - start.tv_sec) * 1e6f + ((float)(stop.tv_usec - start.tv_usec));
@@ -51,7 +54,7 @@ void clearTestMatrix(float* sMatrixValues) {
 void initEigs(int p_nEigNum, int p_nMatrixDimension, float** p_eigenValues, float** devEigVectors)
 {
   (*p_eigenValues) = (float*) malloc(p_nEigNum * sizeof(float));
-  CUDA_SAFE_CALL(cudaMalloc((void**)devEigVectors, p_nMatrixDimension * sizeof(float)*p_nEigNum);)
+  CUDA_SAFE_CALL(cudaMalloc((void**)devEigVectors, p_nMatrixDimension * sizeof(float)*p_nEigNum));
   //memset(*p_eigenValues, 0, p_nEigNum * sizeof(float));
   //memset(*p_eigenVectors, 0, p_nEigNum * p_nMatrixDimension * sizeof(float));
 }
@@ -75,8 +78,8 @@ void initStartingVector(int p_nMatrixDimension, float* p_aaDMatrixV)
 void lanczosInit(int p_nEigNum, int p_nMatrixDimension, float** p_aInitVector, float** p_aBeta, float** p_aAlpha,
                  float** p_aTEigVals, float** p_aaTEigVecs)
 {
-	cublasStatus status;
-	status = cublasInit();
+	cublasStatus_t status;
+	status = CUBLAS_GET_ERR(cublasCreate(&cubHandle));
 	if (status != CUBLAS_STATUS_SUCCESS)
 	{
 		printf("!!!! CUBLAS initialization error\n");
@@ -102,8 +105,8 @@ void lanczosClear(float* p_aInitVector, float* p_aBeta, float* p_aAlpha, float* 
   free(p_aTEigVals);
   free(p_aaTEigVecs);
 
-  cublasStatus status;
-  status = cublasShutdown();
+  cublasStatus_t status;
+  status = CUBLAS_GET_ERR(cublasDestroy(cubHandle));
   if (status != CUBLAS_STATUS_SUCCESS) {
     printf ("!!!! shutdown error (A)\n");
     return;
@@ -126,11 +129,11 @@ bool TestForConvergence(int p_nEigNum, int p_nMatrixDimension, int p_nIter,
     }
   }
  /*  for (int i = p_nEigNum - 1; i >= 0; i--) { */
-/* 		cublasSetVector(p_nIter+1, sizeof(float), p_aaTEigVecs+i*(p_nIter+1), 1, p_daVectorS, 1); */
+/* 		CUBLAS_GET_ERR(cublasSetVector(p_nIter+1, sizeof(float), p_aaTEigVecs+i*(p_nIter+1), 1, p_daVectorS, 1)); */
 /* 		cublasSgemv('n', p_nMatrixDimension, p_nIter+1, 1, p_daaDMatrixV, p_nMatrixDimension, p_daVectorS, 1, */
 /* 				0, p_daVectorX, 1); */
 
-/* 		float fNorm = cublasSnrm2(p_nMatrixDimension, p_daVectorX, 1); */
+/* 		float fNorm = CUBLAS_GET_ERR(cublasSnrm2(p_nMatrixDimension, p_daVectorX, 1)); */
 
 /* 		if (abs(p_aBeta[p_nIter]*p_aaTEigVecs[i * (p_nIter + 1) + p_nIter])/fNorm > TOLERANCE) */
 /* 			return false; */
@@ -155,16 +158,13 @@ void calcEigs(int width, int height, int p_nEigNum, int p_nMatrixDimension, int 
 	float* devEigVecs;
 	size_t eigenVectorPitch;
 	cudaError_t cuerror;
-	cuerror = cudaMallocPitch((void**)&devEigVecs, &eigenVectorPitch, p_nMatrixDimension * sizeof(float), p_nEigNum);
-	if (cuerror != cudaSuccess)
-	{
-		printf("\nAlloc failed!");
+	CUDA_SAFE_CALL(cudaMallocPitch((void**)&devEigVecs, &eigenVectorPitch, p_nMatrixDimension * sizeof(float), p_nEigNum));
+	//CUDA_SAFE_CALL((cudaMalloc((void**)&devEigVecs,p_nMatrixDimension * sizeof(float)* p_nEigNum));
 
-	}
-	//cudaMalloc((void**)&devEigVecs,p_nMatrixDimension * sizeof(float)* p_nEigNum);
-
-	cudaMemcpy2D(devTEigVecs, tEigenVectorPitch, p_aaTEigVecs, tVecLength * sizeof(float), tVecLength * sizeof(float), p_nEigNum, cudaMemcpyHostToDevice);
-	cublasSgemm('n', 'n', p_nMatrixDimension, p_nEigNum, tVecLength, 1.0f, p_daaDMatrixV, p_nMatrixDimension, devTEigVecs, tEigenVectorPitch/sizeof(float), 0.0f, devEigVecs, p_nMatrixDimension);
+	CUDA_SAFE_CALL(cudaMemcpy2D(devTEigVecs, tEigenVectorPitch, p_aaTEigVecs, tVecLength * sizeof(float), tVecLength * sizeof(float), p_nEigNum, cudaMemcpyHostToDevice));
+	float one = 1.0f;
+	float zero = 0.0f;
+	CUBLAS_GET_ERR(cublasSgemm(cubHandle, CUBLAS_OP_N, CUBLAS_OP_N, p_nMatrixDimension, p_nEigNum, tVecLength, (const float *) &one, p_daaDMatrixV, p_nMatrixDimension, devTEigVecs, tEigenVectorPitch/sizeof(float), (const float *) &zero, devEigVecs, p_nMatrixDimension));
 
         //printf("multiplied %d vectors \n", tVecLength);
 	//dim3 blockDim = dim3(256, 1);
@@ -174,9 +174,9 @@ void calcEigs(int width, int height, int p_nEigNum, int p_nMatrixDimension, int 
 	dim3 gridDim((width - 1)/XBLOCK + 1, (height - 1)/(YBLOCK) + 1);
 	//generalizeVectors<<<gridDim, blockDim>>>(p_nMatrixDimension, p_nEigNum, devEigVecs, eigenVectorPitch/sizeof(float), devRSqrtSum);
 	scaleEigByD<<<gridDim, blockDim>>>(width, height, devRSqrtSum, devEigVecs, p_nEigNum);
-	//cudaMemcpy2D(p_eigenVectors, p_nMatrixDimension * sizeof(float), devEigVecs, eigenVectorPitch, p_nMatrixDimension * sizeof(float), p_nEigNum, cudaMemcpyDeviceToHost);
+	//CUDA_SAFE_CALL(cudaMemcpy2D(p_eigenVectors, p_nMatrixDimension * sizeof(float), devEigVecs, eigenVectorPitch, p_nMatrixDimension * sizeof(float), p_nEigNum, cudaMemcpyDeviceToHost));
 
-	cudaMemcpy(p_eigenVectors, devEigVecs,  p_nMatrixDimension * sizeof(float)*p_nEigNum, cudaMemcpyDeviceToHost);
+	CUDA_SAFE_CALL(cudaMemcpy(p_eigenVectors, devEigVecs,  p_nMatrixDimension * sizeof(float)*p_nEigNum, cudaMemcpyDeviceToHost));
 
 }
 
@@ -221,31 +221,34 @@ void lanczosIteration(float* d_aaDMatrixV, int k, int i, float* d_aVectorQQ,
 	stencilMVM<<<gridDim, blockDim>>>(width, height, nPixels, nDiags, nDimUnroll, 
         devMatrix, matrixPitchInFloats, d_aVectorZ);
 
+	float axAlpha;
 	if (iteration > 0)
 	{
-		//cublasScopy(p_nMatrixDimension, d_aaDMatrixV + (i-1)*p_nMatrixDimension, 1, d_aVectorQQPrev, 1);
-		//cublasScopy(p_nMatrixDimension, d_aaDMatrixV + p_nMatrixDimension, 1, d_aVectorQQPrev, 1);
+		//CUBLAS_GET_ERR(cublasScopy(p_nMatrixDimension, d_aaDMatrixV + (i-1)*p_nMatrixDimension, 1, d_aVectorQQPrev, 1));
+		//CUBLAS_GET_ERR(cublasScopy(p_nMatrixDimension, d_aaDMatrixV + p_nMatrixDimension, 1, d_aVectorQQPrev, 1));
 		//r = r - v(i-1)*beta(i-1)
-		//cublasSaxpy(p_nMatrixDimension, (-1) * aBeta[i-1], d_aVectorQQPrev, 1, d_aVectorZ, 1);
-
-		cublasSaxpy(p_nMatrixDimension, (-1) * aBeta[iteration-1], d_aaDMatrixV + read*p_nMatrixDimension, 1, d_aVectorZ, 1);
+		//CUBLAS_GET_ERR(cublasSaxpy(p_nMatrixDimension, (-1) * aBeta[i-1], d_aVectorQQPrev, 1, d_aVectorZ, 1));
+		axAlpha = (-1) * aBeta[iteration-1];
+		CUBLAS_GET_ERR(cublasSaxpy(cubHandle, p_nMatrixDimension, (const float *) &axAlpha, d_aaDMatrixV + read*p_nMatrixDimension, 1, d_aVectorZ, 1));
 	}
 	//alpha(i) = v(i) * r
         float oldalpha=aAlpha[iteration];
-	aAlpha[iteration] = cublasSdot(p_nMatrixDimension, d_aVectorQQ, 1, d_aVectorZ, 1);
+	CUBLAS_GET_ERR(cublasSdot(cubHandle, p_nMatrixDimension, d_aVectorQQ, 1, d_aVectorZ, 1, &aAlpha[iteration]));
         if(storeVectors && iteration<nIterations) assert(oldalpha == aAlpha[iteration]);
 	//r = r - v(j) * alpha(j)
-	cublasSaxpy(p_nMatrixDimension, (-1) * aAlpha[iteration], d_aVectorQQ, 1, d_aVectorZ, 1);
+	axAlpha = (-1) * aAlpha[iteration];
+	CUBLAS_GET_ERR(cublasSaxpy(cubHandle, p_nMatrixDimension, (const float *) &axAlpha, d_aVectorQQ, 1, d_aVectorZ, 1));
 
 	//Reorthogonalization goes here, but we're not doing it
 	//beta(j) = norm2(r)
-	aBeta[iteration] = cublasSnrm2(p_nMatrixDimension, d_aVectorZ, 1);
+	CUBLAS_GET_ERR(cublasSnrm2(cubHandle, p_nMatrixDimension, d_aVectorZ, 1, &aBeta[iteration]));
 	//v(j+1) = r / beta(j)
-	cublasScopy(p_nMatrixDimension, d_aVectorZ, 1, d_aVectorQQ, 1);
-	cublasSscal(p_nMatrixDimension, 1/aBeta[iteration], d_aVectorQQ, 1);
+	CUBLAS_GET_ERR(cublasScopy(cubHandle, p_nMatrixDimension, (const float *) d_aVectorZ, 1, d_aVectorQQ, 1));
+	float scAlpha = 1/aBeta[iteration];
+	CUBLAS_GET_ERR(cublasSscal(cubHandle, p_nMatrixDimension, (const float *) &scAlpha, d_aVectorQQ, 1));
 
-	//cublasScopy(p_nMatrixDimension, d_aVectorQQ, 1, d_aaDMatrixV + ((i+1)%2)*p_nMatrixDimension, 1);
-	cublasScopy(p_nMatrixDimension, d_aVectorQQ, 1, d_aaDMatrixV + write*p_nMatrixDimension, 1);
+	//CUBLAS_GET_ERR(cublasScopy(p_nMatrixDimension, d_aVectorQQ, 1, d_aaDMatrixV + ((i+1)%2)*p_nMatrixDimension, 1));
+	CUBLAS_GET_ERR(cublasScopy(cubHandle, p_nMatrixDimension, d_aVectorQQ, 1, d_aaDMatrixV + write*p_nMatrixDimension, 1));
 
 	if(i==maxIterationsThatFitGPU-1 || iteration>=nIterations-1)
 	{
@@ -261,8 +264,9 @@ void lanczosIteration(float* d_aaDMatrixV, int k, int i, float* d_aVectorQQ,
                     CUDA_SAFE_CALL(cudaMallocPitch((void**)&RitzGPU, &RitzGPUPitch, sizeof(float)*IterationsToDo, p_nEigNum));
                     CUDA_SAFE_CALL(cudaMemcpy2D(RitzGPU, RitzGPUPitch, RitzVectors+k*(maxIterationsThatFitGPU-1), (nIterations+1)*sizeof(float), IterationsToDo*sizeof(float), p_nEigNum, cudaMemcpyHostToDevice));
                     assert(RitzGPU != NULL); 
-                    
-                    cublasSgemm('n','n',p_nMatrixDimension, p_nEigNum, IterationsToDo,  1.0, d_aaDMatrixV, p_nMatrixDimension, RitzGPU, RitzGPUPitch/sizeof(float), 1.0, p_eigenVectors, p_nMatrixDimension );
+                   
+		    float one = 1.0f; 
+                    CUBLAS_GET_ERR(cublasSgemm(cubHandle, CUBLAS_OP_N, CUBLAS_OP_N, p_nMatrixDimension, p_nEigNum, IterationsToDo, (const float *) &one, d_aaDMatrixV, p_nMatrixDimension, RitzGPU, RitzGPUPitch/sizeof(float), (const float *) &one, p_eigenVectors, p_nMatrixDimension ));
                    
                     
                     CUDA_SAFE_CALL(cudaFree(RitzGPU));
@@ -412,7 +416,7 @@ void lanczos(int p_nMatrixDimension, dim3 gridDim, dim3 blockDim,
 	}
         size_t totalMemory, availableMemory;
         cuMemGetInfo(&availableMemory,&totalMemory );
-        printf("Available %u bytes on GPU\n", availableMemory);
+        printf("Available %zu bytes on GPU\n", availableMemory);
 
         float margin = 0.9;
         int maxIterationsThatFitGPU;
@@ -422,15 +426,16 @@ void lanczos(int p_nMatrixDimension, dim3 gridDim, dim3 blockDim,
             printf("Can fit %d iterations on GPU\n", maxIterationsThatFitGPU);
        
             // to do: write code to free memory before allocating for the next iterations.. 
+            size_t v_size = p_nMatrixDimension * sizeof(float);
+ 
+            CUDA_SAFE_CALL(cudaMalloc((void**)&d_aaDMatrixV, (maxIterationsThatFitGPU+1) * v_size));
+            CUDA_SAFE_CALL(cudaMalloc((void**)&d_aVectorZ, v_size));
+            CUDA_SAFE_CALL(cudaMalloc((void**)&d_aVectorQQ, v_size));
+            CUDA_SAFE_CALL(cudaMalloc((void**)&d_aVectorQQPrev, v_size));
+            CUDA_SAFE_CALL(cudaMalloc((void**)&d_aVectorT1, v_size));
+            CUDA_SAFE_CALL(cudaMalloc((void**)&d_aVectorT2, v_size));
 
-            cublasAlloc(p_nMatrixDimension * (maxIterationsThatFitGPU+ 1), sizeof(float), (void**)&d_aaDMatrixV);
-            cublasAlloc(p_nMatrixDimension, sizeof(float), (void**)&d_aVectorZ);
-            cublasAlloc(p_nMatrixDimension, sizeof(float), (void**)&d_aVectorQQ);
-            cublasAlloc(p_nMatrixDimension, sizeof(float), (void**)&d_aVectorQQPrev);
-            cublasAlloc(p_nMatrixDimension, sizeof(float), (void**)&d_aVectorT1);
-            cublasAlloc(p_nMatrixDimension, sizeof(float), (void**)&d_aVectorT2);
-
-            cudaMalloc((void**)&devVector, p_nMatrixDimension * sizeof(float));
+            CUDA_SAFE_CALL(cudaMalloc((void**)&devVector, v_size));
 
             ce = cudaGetLastError();
             if(ce != cudaSuccess)
@@ -451,8 +456,8 @@ void lanczos(int p_nMatrixDimension, dim3 gridDim, dim3 blockDim,
 
         //float *h_aaDMatrixV = malloc(sizeof(float)*p_nMatrixDimension*(MAXITER+1));
 
-	cublasSetVector(p_nMatrixDimension, sizeof(float), aInitVector, 1, d_aaDMatrixV, 1);
-	cublasScopy(p_nMatrixDimension, d_aaDMatrixV, 1, d_aVectorQQ, 1);
+	CUBLAS_GET_ERR(cublasSetVector(p_nMatrixDimension, sizeof(float), aInitVector, 1, d_aaDMatrixV, 1));
+	CUBLAS_GET_ERR(cublasScopy(cubHandle, p_nMatrixDimension, d_aaDMatrixV, 1, d_aVectorQQ, 1));
 	int eigCheck = p_nEigNum + 20;//p_nEigNum * 5;
 	int n = MAXITER + 1;
 	char range = 'I';
@@ -481,10 +486,10 @@ void lanczos(int p_nMatrixDimension, dim3 gridDim, dim3 blockDim,
 	int radius = theStencil->getRadius();
 	int nDimUnroll = findNDimUnroll(nDiags);
 	int matrixPitchInFloats = findPitchInFloats(nPixels);
-/* 	cudaChannelFormatDesc channelDesc = cudaCreateChannelDesc<float>(); */
+/* 	CUDA_SAFE_CALL(cudaChannelFormatDesc channelDesc = cudaCreateChannelDesc<float>()); */
 		
 /* 	size_t offset = 0; */
-/* 	cudaBindTexture(&offset, &texVector, devVector, &channelDesc, nPixels * sizeof(float)); */
+/* 	CUDA_SAFE_CALL(cudaBindTexture(&offset, &texVector, devVector, &channelDesc, nPixels * sizeof(float))); */
 
   bindTexture(devVector, nPixels);
 
@@ -543,7 +548,7 @@ void lanczos(int p_nMatrixDimension, dim3 gridDim, dim3 blockDim,
 		/*cudaThreadSynchronize();*/ gettimeofday(&convergence, 0);
 		//currentIteration->push_back(getTimeUs(four64, convergence));
 
-		//cublasScopy(p_nMatrixDimension, d_aVectorQQ, 1, d_aaDMatrixV + (i+1)*p_nMatrixDimension, 1);
+		//CUBLAS_GET_ERR(cublasScopy(p_nMatrixDimension, d_aVectorQQ, 1, d_aaDMatrixV + (i+1)*p_nMatrixDimension, 1));
 		struct timeval stop;
 		/*cudaThreadSynchronize();*/ gettimeofday(&stop, 0);
 		currentIteration->push_back(getTimeUs(convergence, stop));
@@ -579,8 +584,8 @@ void lanczos(int p_nMatrixDimension, dim3 gridDim, dim3 blockDim,
         else
         {
         
-            cublasSetVector(p_nMatrixDimension, sizeof(float), aInitVector, 1, d_aaDMatrixV, 1);
-            cublasScopy(p_nMatrixDimension, d_aaDMatrixV, 1, d_aVectorQQ, 1);
+            CUBLAS_GET_ERR(cublasSetVector(p_nMatrixDimension, sizeof(float), aInitVector, 1, d_aaDMatrixV, 1));
+            CUBLAS_GET_ERR(cublasScopy(cubHandle, p_nMatrixDimension, d_aaDMatrixV, 1, d_aVectorQQ, 1));
     
             int nIterations = i;
             int cycle;
@@ -721,12 +726,12 @@ void lanczos(int p_nMatrixDimension, dim3 gridDim, dim3 blockDim,
         delete currentIteration;
 
 
-	cublasFree(d_aVectorT1);
-	cublasFree(d_aVectorT2);
-	cublasFree(d_aaDMatrixV);
-	cublasFree(d_aVectorQQPrev);
-	cublasFree(d_aVectorQQ);
-	cublasFree(d_aVectorZ);
+	CUDA_SAFE_CALL(cudaFree(d_aVectorT1));
+	CUDA_SAFE_CALL(cudaFree(d_aVectorT2));
+	CUDA_SAFE_CALL(cudaFree(d_aaDMatrixV));
+	CUDA_SAFE_CALL(cudaFree(d_aVectorQQPrev));
+	CUDA_SAFE_CALL(cudaFree(d_aVectorQQ));
+	CUDA_SAFE_CALL(cudaFree(d_aVectorZ));
 	lanczosClear(aInitVector, aBeta, aAlpha, aTEigVals, aaTEigVecs);
 }
 
@@ -1018,7 +1023,7 @@ void NormalizeEigVecs(int p_nMatrixDimension, float* p_aaEigVecs, int p_nEigNum)
   
 /*   uint nDimension = myStencil.getStencilArea(); */
   
-/*   cudaMalloc((void**)&devMatrix, nDimension * nPixels * sizeof(float)); */
+/*   CUDA_SAFE_CALL(cudaMalloc((void**)&devMatrix, nDimension * nPixels * sizeof(float))); */
  
 /* 	CUDA_SAFE_CALL(cudaMemcpy(devMatrix, hostMatrix, nPixels * nDimension * sizeof(float), cudaMemcpyHostToDevice)); */
  
