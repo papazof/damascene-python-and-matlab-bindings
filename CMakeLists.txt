@@ -53,6 +53,12 @@ SET(DAMASCENE_SRC
     )
 
 
+# Print all variables
+#get_cmake_property(_variableNames VARIABLES)
+#foreach (_variableName ${_variableNames})
+#    message(STATUS "${_variableName}=${${_variableName}}")
+#endforeach()
+
 CUDA_ADD_LIBRARY(damascene SHARED ${DAMASCENE_SRC})
 CUDA_ADD_CUBLAS_TO_TARGET(damascene)
-TARGET_LINK_LIBRARIES(damascene ${CUDA_LIBRARIES} acml)
+TARGET_LINK_LIBRARIES(damascene ${CUDA_LIBRARIES} cuda acml)
